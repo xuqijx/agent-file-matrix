@@ -7,6 +7,7 @@ patches socket.connect before importing the suite. Fixtures are not written.
 from __future__ import annotations
 
 import ast
+from contextlib import contextmanager
 import json
 import os
 import stat
@@ -54,6 +55,36 @@ def ids(report: dict, check_id: str | None = None) -> list[dict]:
     if check_id is None:
         return report["diagnostics"]
     return [item for item in report["diagnostics"] if item["id"] == check_id]
+
+
+@contextmanager
+def forbid_opens_outside(root: Path):
+    """Fail if instruction parsing opens a path outside the scan root."""
+    root_abs = Path(os.path.abspath(root))
+    real_open = os.open
+
+    def guarded(path, flags, *args, **kwargs):  # noqa: ANN001
+        target = Path(os.path.abspath(path))
+        try:
+            target.relative_to(root_abs)
+        except ValueError as exc:
+            raise AssertionError(f"opened outside repo: {target}") from exc
+        return real_open(path, flags, *args, **kwargs)
+
+    os.open = guarded  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        os.open = real_open  # type: ignore[assignment]
+
+
+def cli_json(root: Path, strict: bool = False) -> tuple[int, dict, str]:
+    args = ["--json", str(root)]
+    if strict:
+        args = ["--strict", *args]
+    proc = run(args)
+    report = json.loads(proc.stdout)
+    return proc.returncode, report, proc.stdout + proc.stderr
 
 
 def fixture_hash() -> str:
@@ -567,6 +598,146 @@ class FixtureTests(unittest.TestCase):
                 elif isinstance(node, ast.ImportFrom):
                     module = (node.module or "").split(".")[0]
                     self.assertNotIn(module, banned, path)
+
+
+class ContractATests(unittest.TestCase):
+    """Contract A, probed against this tree before the docs were aligned.
+
+    The original suite did not cover an absolute ``@`` import that stays
+    inside the repo root, an absolute path that leaves it, or ``~/``.
+    Relative escape was only the missing ``../outside-missing.md`` case,
+    without a sentinel body and without ``--strict``.
+    """
+
+    def _prepare(self, root: Path, claude: str) -> None:
+        (root / "AGENTS.md").write_text("# Root canon\n", encoding="utf-8")
+        (root / "CLAUDE.md").write_text(claude, encoding="utf-8")
+
+    def _assert_pair(
+        self,
+        root: Path,
+        default_exit: int,
+        strict_exit: int,
+        shadow: bool,
+        skip_tokens: list[str],
+        broken_targets: list[str] | None = None,
+    ) -> None:
+        broken_targets = broken_targets or []
+        for strict, expected in ((False, default_exit), (True, strict_exit)):
+            with forbid_opens_outside(root):
+                report = build_report(root, strict=strict)
+            self._assert_report(report, expected, strict, shadow, skip_tokens, broken_targets)
+            code, cli, blob = cli_json(root, strict=strict)
+            self.assertEqual(code, expected)
+            self.assertNotIn("SENTINEL_OUTSIDE_BODY_41c0ee", blob)
+            self._assert_report(cli, expected, strict, shadow, skip_tokens, broken_targets)
+
+    def _assert_report(
+        self,
+        report: dict,
+        expected: int,
+        strict: bool,
+        shadow: bool,
+        skip_tokens: list[str],
+        broken_targets: list[str],
+    ) -> None:
+        self.assertEqual(report["exit_code"], expected)
+        self.assertNotIn("SENTINEL_OUTSIDE_BODY_41c0ee", json.dumps(report))
+        shadows = ids(report, "shadow-no-import")
+        if shadow:
+            self.assertEqual(len(shadows), 1)
+            self.assertEqual(shadows[0]["severity"], "error" if strict else "warning")
+            self.assertEqual(shadows[0]["strict_upgraded"], strict)
+        else:
+            self.assertEqual(shadows, [])
+            self.assertTrue(all(not item["strict_upgraded"] for item in report["diagnostics"]))
+        self.assertEqual(
+            sorted(item["import_target"] for item in ids(report, "out-of-root-skip")),
+            sorted(skip_tokens),
+        )
+        self.assertEqual(
+            sorted(item["import_target"] for item in ids(report, "broken-at-import")),
+            sorted(broken_targets),
+        )
+        for rel in report["files_read"]:
+            self.assertNotIn("..", Path(rel).parts)
+
+    def test_in_root_absolute_import_clears_shadow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agents = root / "AGENTS.md"
+            outside = root.parent / f"contract-a-neighbor-{root.name}.md"
+            outside.write_text("SENTINEL_OUTSIDE_BODY_41c0ee\n", encoding="utf-8")
+            try:
+                self._prepare(root, f"@{agents}\n")
+                self._assert_pair(root, 0, 0, shadow=False, skip_tokens=[])
+                report = build_report(root, strict=False)
+                self.assertEqual(report["files_read"], ["AGENTS.md", "CLAUDE.md"])
+            finally:
+                outside.unlink(missing_ok=True)
+
+    def test_in_root_absolute_missing_is_broken_not_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            missing = root / "docs" / "missing.md"
+            self._prepare(root, f"@{missing}\n")
+            self._assert_pair(
+                root,
+                1,
+                1,
+                shadow=True,
+                skip_tokens=[],
+                broken_targets=["docs/missing.md"],
+            )
+
+    def test_absolute_escape_is_skip_and_unread(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outside = root.parent / f"contract-a-abs-{root.name}.md"
+            outside.write_text("SENTINEL_OUTSIDE_BODY_41c0ee\n", encoding="utf-8")
+            try:
+                self._prepare(root, f"@{outside}\n")
+                self._assert_pair(root, 0, 1, shadow=True, skip_tokens=[str(outside)])
+            finally:
+                outside.unlink(missing_ok=True)
+
+    def test_tilde_escape_is_skip_and_unread(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            name = f"contract-a-tilde-{root.name}.md"
+            home_file = Path.home() / name
+            home_file.write_text("SENTINEL_OUTSIDE_BODY_41c0ee\n", encoding="utf-8")
+            try:
+                self._prepare(root, f"@~/{name}\n")
+                self._assert_pair(root, 0, 1, shadow=True, skip_tokens=[f"~/{name}"])
+            finally:
+                home_file.unlink(missing_ok=True)
+
+    def test_relative_escape_is_skip_and_unread(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            name = f"contract-a-rel-{root.name}.md"
+            outside = root.parent / name
+            outside.write_text("SENTINEL_OUTSIDE_BODY_41c0ee\n", encoding="utf-8")
+            try:
+                self._prepare(root, f"@../{name}\n")
+                self._assert_pair(root, 0, 1, shadow=True, skip_tokens=[f"../{name}"])
+            finally:
+                outside.unlink(missing_ok=True)
+
+    def test_tilde_inside_root_is_in_repo_import(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._prepare(root, "@~/AGENTS.md\n")
+            old = os.environ.get("HOME")
+            os.environ["HOME"] = str(root)
+            try:
+                self._assert_pair(root, 0, 0, shadow=False, skip_tokens=[])
+            finally:
+                if old is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old
 
 
 if __name__ == "__main__":

@@ -369,6 +369,18 @@ class ResolvedImport:
 
 
 def resolve_import(file_logical: Path, token: ImportToken, root: Path) -> ResolvedImport:
+    """Resolve one ``@`` import. Contract A.
+
+    A token is an ordinary in-repo import when its normalized absolute path
+    stays inside ``root``. That includes a literal absolute ``@/path`` and a
+    ``~/...`` token whose home expansion still lands inside ``root``. Either
+    one can clear ``shadow-no-import`` when it resolves to root ``AGENTS.md``.
+
+    ``out-of-root`` is only an actual escape: an absolute path outside
+    ``root``, a ``~/...`` expansion outside ``root``, or a relative path that
+    climbs past ``root``. Those targets are not stat'd for a read and are not
+    opened.
+    """
     raw = token.token
     expanded = raw
     if raw.startswith("~"):

@@ -4,7 +4,9 @@ Shadow pairing (v0, writer-confirmed): ``shadow-no-import`` compares each
 existing CLAUDE-side file with the repository-root ``AGENTS.md`` only.
 An ``@`` import suppresses that warning only when it resolves to that root
 file. ``@AGENTS.md`` and ``@./AGENTS.md`` are equivalent after resolution
-relative to the instruction file's directory.
+relative to the instruction file's directory. Contract A: an absolute
+``@/path`` or a ``~/...`` expansion that normalizes inside the repo root is
+a normal in-repo import, not ``out-of-root-skip``.
 """
 
 from __future__ import annotations

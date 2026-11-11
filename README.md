@@ -114,9 +114,9 @@ Citations carried in the JSON `citations` object:
 ### Rules locked for v0
 
 - **Shadow pairing.** Every CLAUDE-side file is compared with repository-root `AGENTS.md` only, not with the nearest nested `AGENTS.md`.
-- **Valid import.** Not limited to the first line. Resolved relative to the instruction file's directory. `@AGENTS.md` and `@./AGENTS.md` are the same path; `@././AGENTS.md` normalizes the same way. From `.claude/CLAUDE.md`, root `AGENTS.md` is `@../AGENTS.md`. A literal `@AGENTS.md` there means `.claude/AGENTS.md` (missing → `broken-at-import`, and it does not clear shadow).
+- **Valid import.** Not limited to the first line. Resolved relative to the instruction file's directory. `@AGENTS.md` and `@./AGENTS.md` are the same path; `@././AGENTS.md` normalizes the same way. From `.claude/CLAUDE.md`, root `AGENTS.md` is `@../AGENTS.md`. A literal `@AGENTS.md` there means `.claude/AGENTS.md` (missing → `broken-at-import`, and it does not clear shadow). **Contract A:** an absolute `@/path`, and a `~/...` path after home expansion, is an ordinary in-repo import when the normalized path is still inside the repo root. If that file is root `AGENTS.md`, it clears `shadow-no-import`. It is not `out-of-root-skip`.
 - **Spans and fences.** Tokens inside Markdown code spans or fenced blocks (`` ``` `` or `~~~`, indent 0–3) are ignored. A quoted path (`@"AGENTS.md"`) is not an import. An unclosed fence or span masks the rest of that region. Four-space indented lines are **not** treated as fences. HTML comments are not special-cased.
-- **Outside targets.** Absolute paths, `~/...`, and relative paths that leave the repo root are info `out-of-root-skip`. They are not read and are not `broken-at-import`.
+- **Outside targets.** `out-of-root-skip` is only an actual escape, after normalization: an absolute path outside the repo root, a `~/...` path whose expansion is outside the root, or a relative path that leaves the root. Those targets are not read and are not `broken-at-import`. An escaping import does not clear shadow, so the default exit stays 0 and `--strict` exits 1 when no import resolves to root `AGENTS.md`.
 - **Symlinks.** Links that resolve outside the repo root are not followed and their target bytes are not read (`out-of-root-skip`). Cycles stop via inode identity and a 32-hop cap (`symlink-cycle`). The tool never writes.
 - **Skills.** A directory entry named `skills` or a file named `SKILL.md` is skipped unread (`skipped-skill`). An `@` import that lands on such a path is the same info, not an error. v0 does not lint skill bodies.
 - **Other info ids** (never upgraded by `--strict`): `unreadable-path`, `read-truncated` (instruction reads stop at 8 MiB), `traversal-limit`.
@@ -227,9 +227,9 @@ agent-file-matrix <repo-root> [--json] [--strict]
 ### v0 已钉死的规则
 
 - **shadow 配对范围：** 每个 CLAUDE 侧文件只和仓库根 `AGENTS.md` 比较，不和「最近的嵌套 AGENTS.md」比较。
-- **有效导入：** 不限首行。相对该指令文件所在目录解析。`@AGENTS.md` 与 `@./AGENTS.md` 是同一路径，`@././AGENTS.md` 规范化后相同。在 `.claude/CLAUDE.md` 里，根文件要写成 `@../AGENTS.md`。那里的字面量 `@AGENTS.md` 指 `.claude/AGENTS.md`（不存在则 `broken-at-import`，也不能消除 shadow）。
+- **有效导入：** 不限首行。相对该指令文件所在目录解析。`@AGENTS.md` 与 `@./AGENTS.md` 是同一路径，`@././AGENTS.md` 规范化后相同。在 `.claude/CLAUDE.md` 里，根文件要写成 `@../AGENTS.md`。那里的字面量 `@AGENTS.md` 指 `.claude/AGENTS.md`（不存在则 `broken-at-import`，也不能消除 shadow）。**契约 A：** 绝对路径 `@/path`，以及家目录展开后的 `~/...`，只要规范化后仍在仓库根内，就按普通仓库内导入处理。若它指向根 `AGENTS.md`，则消除 `shadow-no-import`。这不是 `out-of-root-skip`。
 - **span / fence：** Markdown 行内代码和围栏代码（`` ``` `` 或 `~~~`，缩进 0–3）里的记号不算导入。引号包住的路径（`@"AGENTS.md"`）不算导入。未闭合的 fence 或 span 会遮住该区域余下部分。缩进 4 空格的行**不**当作 fence。HTML 注释不做特殊处理。
-- **越界目标：** 绝对路径、`~/...`、以及走出仓库根的相对路径是 info `out-of-root-skip`。不读取，也不算 `broken-at-import`。
+- **越界目标：** 只有规范化后落在仓库根之外，才是 info `out-of-root-skip`。包括根外的绝对路径、展开后仍在根外的 `~/...`，以及走出仓库根的相对路径。这些目标不读取，也不算 `broken-at-import`。越界导入不能消除 shadow；没有其它导入指向根 `AGENTS.md` 时，默认退出码仍是 0，`--strict` 为 1。
 - **符号链接：** 指向仓库根之外的链接不跟随、不读目标内容（`out-of-root-skip`）。用 inode 和最多 32 跳检测循环（`symlink-cycle`）。从不写文件。
 - **skills：** 名为 `skills` 的目录项或名为 `SKILL.md` 的文件直接跳过、不打开（`skipped-skill`）。`@` 导入若落到这些路径，同样只报这条 info，不是 error。v0 不检查 skill 正文。
 - **其它 info**（`--strict` 不升级）：`unreadable-path`、`read-truncated`（指令文件最多读 8 MiB）、`traversal-limit`。
@@ -340,9 +340,9 @@ agent-file-matrix <repo-root> [--json] [--strict]
 ### v0 已釘死的規則
 
 - **shadow 配對範圍：** 每個 CLAUDE 側檔案只和儲存庫根 `AGENTS.md` 比較，不和「最近的巢狀 AGENTS.md」比較。
-- **有效匯入：** 不限首行。相對該指令檔所在目錄解析。`@AGENTS.md` 與 `@./AGENTS.md` 是同一路徑，`@././AGENTS.md` 正規化後相同。在 `.claude/CLAUDE.md` 裡，根檔案要寫成 `@../AGENTS.md`。那裡的字面 `@AGENTS.md` 指 `.claude/AGENTS.md`（不存在則 `broken-at-import`，也不能消除 shadow）。
+- **有效匯入：** 不限首行。相對該指令檔所在目錄解析。`@AGENTS.md` 與 `@./AGENTS.md` 是同一路徑，`@././AGENTS.md` 正規化後相同。在 `.claude/CLAUDE.md` 裡，根檔案要寫成 `@../AGENTS.md`。那裡的字面 `@AGENTS.md` 指 `.claude/AGENTS.md`（不存在則 `broken-at-import`，也不能消除 shadow）。**契約 A：** 絕對路徑 `@/path`，以及家目錄展開後的 `~/...`，只要正規化後仍在儲存庫根內，就按普通儲存庫內匯入處理。若它指向根 `AGENTS.md`，則消除 `shadow-no-import`。這不是 `out-of-root-skip`。
 - **span / fence：** Markdown 行內程式碼與圍欄程式碼（`` ``` `` 或 `~~~`，縮排 0–3）裡的記號不算匯入。引號包住的路徑（`@"AGENTS.md"`）不算匯入。未閉合的 fence 或 span 會遮住該區域其餘部分。縮排 4 空格的行**不**當作 fence。HTML 註解不做特殊處理。
-- **越界目標：** 絕對路徑、`~/...`、以及走出儲存庫根的相對路徑是 info `out-of-root-skip`。不讀取，也不算 `broken-at-import`。
+- **越界目標：** 只有正規化後落在儲存庫根之外，才是 info `out-of-root-skip`。包括根外的絕對路徑、展開後仍在根外的 `~/...`，以及走出儲存庫根的相對路徑。這些目標不讀取，也不算 `broken-at-import`。越界匯入不能消除 shadow；沒有其它匯入指向根 `AGENTS.md` 時，預設結束碼仍是 0，`--strict` 為 1。
 - **符號連結：** 指向儲存庫根之外的連結不跟隨、不讀目標內容（`out-of-root-skip`）。用 inode 與最多 32 跳偵測循環（`symlink-cycle`）。從不寫入檔案。
 - **skills：** 名為 `skills` 的目錄項或名為 `SKILL.md` 的檔案直接跳過、不開啟（`skipped-skill`）。`@` 匯入若落到這些路徑，同樣只報這條 info，不是 error。v0 不檢查 skill 正文。
 - **其它 info**（`--strict` 不升級）：`unreadable-path`、`read-truncated`（指令檔最多讀 8 MiB）、`traversal-limit`。
@@ -453,9 +453,9 @@ agent-file-matrix <repo-root> [--json] [--strict]
 ### v0 で固定した規則
 
 - **shadow の対:** 各 CLAUDE 側ファイルはリポジトリルートの `AGENTS.md` とだけ比べます。最も近いネスト `AGENTS.md` とは比べません。
-- **有効なインポート:** 先頭行に限りません。指示ファイルのディレクトリ相対で解決します。`@AGENTS.md` と `@./AGENTS.md` は同じパスで、`@././AGENTS.md` も正規化すると同じです。`.claude/CLAUDE.md` からルートを指すのは `@../AGENTS.md` です。そこにある字句 `@AGENTS.md` は `.claude/AGENTS.md` です（無ければ `broken-at-import` であり、shadow も消えません）。
+- **有効なインポート:** 先頭行に限りません。指示ファイルのディレクトリ相対で解決します。`@AGENTS.md` と `@./AGENTS.md` は同じパスで、`@././AGENTS.md` も正規化すると同じです。`.claude/CLAUDE.md` からルートを指すのは `@../AGENTS.md` です。そこにある字句 `@AGENTS.md` は `.claude/AGENTS.md` です（無ければ `broken-at-import` であり、shadow も消えません）。**契約 A:** 絶対パス `@/path` と、ホーム展開後の `~/...` は、正規化してもリポジトリルートの中に残るなら通常のリポジトリ内インポートです。それがルート `AGENTS.md` なら `shadow-no-import` は消え、`out-of-root-skip` にはなりません。
 - **span / fence:** Markdown のコードスパンとフェンス（`` ``` `` または `~~~`、インデント 0–3）の中は無視します。引用符で囲んだパス（`@"AGENTS.md"`）はインポートではありません。閉じていない fence または span は、その領域の残りを隠します。スペース 4 つのインデント行は fence に**しません**。HTML コメントは特別扱いしません。
-- **外へ出る対象:** 絶対パス、`~/...`、リポジトリルートの外へ出る相対パスは info `out-of-root-skip` です。読まず、`broken-at-import` にもしません。
+- **外へ出る対象:** 正規化後にリポジトリルートの外へ出たときだけ info `out-of-root-skip` です。ルート外の絶対パス、展開してもルート外の `~/...`、ルートを出る相対パスがこれにあたります。対象は読まず、`broken-at-import` にもしません。外へ出るインポートは shadow を消さないので、ほかにルート `AGENTS.md` へ解決するインポートが無ければ、デフォルトの終了コードは 0、`--strict` は 1 です。
 - **シンボリックリンク:** リポジトリルートの外を指すリンクは辿らず、対象のバイトも読みません（`out-of-root-skip`）。inode と最大 32 ホップで循環を止めます（`symlink-cycle`）。書き込みはしません。
 - **skills:** 名前が `skills` のディレクトリエントリと、名前が `SKILL.md` のファイルは開かずに飛ばします（`skipped-skill`）。`@` インポートがそこに落ちても同じ info で、error ではありません。v0 は skill 本文を検査しません。
 - **その他の info**（`--strict` では上がらない）: `unreadable-path`、`read-truncated`（指示ファイルは 8 MiB で打ち切り）、`traversal-limit`。
