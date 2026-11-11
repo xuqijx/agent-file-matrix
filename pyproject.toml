@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-file-matrix"
+version = "0.1.0"
+description = "Offline inventory of cross-runtime agent instruction files and mechanical load traps."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "xuqijx" }]
+dependencies = []
+
+[project.scripts]
+agent-file-matrix = "agent_file_matrix.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/xuqijx/agent-file-matrix"
+
+[tool.setuptools.packages.find]
+include = ["agent_file_matrix*"]

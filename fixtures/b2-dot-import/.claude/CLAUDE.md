@@ -1,0 +1,3 @@
+Project deltas.
+
+@../AGENTS.md
